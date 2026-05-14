@@ -8,104 +8,84 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const port = parseInt(process.env.PORT) || 3000;
+const PORT = process.env.PORT || 3000;
 
-// Spawn the stdio MCP server
+// Spawn stdio MCP server
 const child = spawn('node', ['src/index.js'], {
   cwd: __dirname,
-  stdio: ['pipe', 'pipe', 'inherit'],
-  env: process.env
+  stdio: ['pipe', 'pipe', 'pipe']
 });
 
-// Track pending requests
-const pendingRequests = new Map();
-let messageId = 0;
+let responseBuffer = '';
+const pendingRequests = {};
 
-// Listen for responses from stdio server
-let buffer = '';
+// Handle stdout from MCP server
 child.stdout.on('data', (data) => {
-  buffer += data.toString();
+  responseBuffer += data.toString();
   
-  // Process complete messages (separated by newlines)
-  const lines = buffer.split('\n');
-  buffer = lines.pop(); // Keep incomplete line in buffer
+  // Try to parse complete JSON messages
+  const lines = responseBuffer.split('\n');
+  responseBuffer = lines[lines.length - 1];
   
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    
+  for (let i = 0; i < lines.length - 1; i++) {
     try {
-      const msg = JSON.parse(line);
-      
-      // Route response to waiting request
-      if (msg.id && pendingRequests.has(msg.id)) {
-        const resolve = pendingRequests.get(msg.id);
-        pendingRequests.delete(msg.id);
-        resolve(msg);
+      const msg = JSON.parse(lines[i]);
+      if (msg.id && pendingRequests[msg.id]) {
+        const callback = pendingRequests[msg.id];
+        delete pendingRequests[msg.id];
+        callback(msg);
       }
     } catch (e) {
-      console.error('Failed to parse MCP response:', line);
+      // Ignore parse errors
     }
   }
 });
 
-// Create HTTP server
+child.stderr.on('data', (data) => {
+  console.error('[MCP stderr]', data.toString());
+});
+
+// HTTP server
 const server = http.createServer(async (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  
-  if (req.method !== 'POST') {
-    res.writeHead(405);
-    res.end(JSON.stringify({ error: 'Method not allowed' }));
-    return;
-  }
-  
-  if (req.url !== '/mcp') {
+  if (req.method !== 'POST' || req.url !== '/mcp') {
     res.writeHead(404);
-    res.end(JSON.stringify({ error: 'Not found' }));
+    res.end();
     return;
   }
-  
+
   let body = '';
-  req.on('data', chunk => {
-    body += chunk.toString();
-  });
+  req.on('data', (chunk) => { body += chunk; });
   
-  req.on('end', async () => {
+  req.on('end', () => {
     try {
-      const request = JSON.parse(body);
+      const msg = JSON.parse(body);
+      msg.id = msg.id || Math.random();
       
-      // Add message ID
-      request.id = ++messageId;
+      // Send to MCP server
+      child.stdin.write(JSON.stringify(msg) + '\n');
       
-      // Send to stdio server
-      child.stdin.write(JSON.stringify(request) + '\n');
+      // Wait for response
+      const timeout = setTimeout(() => {
+        if (pendingRequests[msg.id]) {
+          delete pendingRequests[msg.id];
+          res.writeHead(408);
+          res.end('{"error":"timeout"}');
+        }
+      }, 29000);
       
-      // Wait for response with timeout
-      const response = await Promise.race([
-        new Promise((resolve) => {
-          pendingRequests.set(request.id, resolve);
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 25000)
-        )
-      ]);
+      pendingRequests[msg.id] = (response) => {
+        clearTimeout(timeout);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(response));
+      };
       
-      res.writeHead(200);
-      res.end(JSON.stringify(response));
-      
-    } catch (error) {
-      console.error('Error handling request:', error);
-      res.writeHead(500);
-      res.end(JSON.stringify({ error: error.message }));
+    } catch (e) {
+      res.writeHead(400);
+      res.end('{"error":"invalid json"}');
     }
   });
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`🚀 Gravity MCP HTTP Server running on port ${port}`);
-  console.log(`📡 MCP Endpoint: http://0.0.0.0:${port}/mcp`);
-});
-
-process.on('SIGTERM', () => {
-  child.kill();
-  server.close();
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 HTTP Server running on port ${PORT}`);
 });
