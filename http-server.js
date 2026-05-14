@@ -8,7 +8,7 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const port = parseInt(process.env.PORT) || 8000;
+const port = parseInt(process.env.PORT) || 3000;
 
 // Spawn the stdio MCP server
 const child = spawn('node', ['src/index.js'], {
