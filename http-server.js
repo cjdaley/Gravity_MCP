@@ -41,7 +41,7 @@ child.stderr.on('data', (data) => {
 });
 
 const server = http.createServer(async (req, res) => {
-  if (req.method !== 'POST' || req.url !== '/mcp') {
+  if (req.method !== 'POST' || (req.url !== '/mcp' && req.url !== '/')) {
     res.writeHead(404);
     res.end();
     return;
