@@ -1,91 +1,16 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
 import http from 'http';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 
-// Spawn stdio MCP server
-const child = spawn('node', ['src/index.js'], {
-  cwd: __dirname,
-  stdio: ['pipe', 'pipe', 'pipe']
-});
-
-let responseBuffer = '';
-const pendingRequests = {};
-
-// Handle stdout from MCP server
-child.stdout.on('data', (data) => {
-  responseBuffer += data.toString();
+const server = http.createServer((req, res) => {
+  console.log('Request:', req.method, req.url);
   
-  // Try to parse complete JSON messages
-  const lines = responseBuffer.split('\n');
-  responseBuffer = lines[lines.length - 1];
-  
-  for (let i = 0; i < lines.length - 1; i++) {
-    try {
-      const msg = JSON.parse(lines[i]);
-      if (msg.id && pendingRequests[msg.id]) {
-        const callback = pendingRequests[msg.id];
-        delete pendingRequests[msg.id];
-        callback(msg);
-      }
-    } catch (e) {
-      // Ignore parse errors
-    }
-  }
-});
-
-child.stderr.on('data', (data) => {
-  console.error('[MCP stderr]', data.toString());
-});
-
-// HTTP server
-const server = http.createServer(async (req, res) => {
-  if (req.method !== 'POST' || req.url !== '/mcp') {
-    res.writeHead(404);
-    res.end();
-    return;
-  }
-
-  let body = '';
-  req.on('data', (chunk) => { body += chunk; });
-  
-  req.on('end', () => {
-    try {
-      const msg = JSON.parse(body);
-      msg.id = msg.id || Math.random();
-      
-      // Send to MCP server
-      child.stdin.write(JSON.stringify(msg) + '\n');
-      
-      // Wait for response
-      const timeout = setTimeout(() => {
-        if (pendingRequests[msg.id]) {
-          delete pendingRequests[msg.id];
-          res.writeHead(408);
-          res.end('{"error":"timeout"}');
-        }
-      }, 29000);
-      
-      pendingRequests[msg.id] = (response) => {
-        clearTimeout(timeout);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(response));
-      };
-      
-    } catch (e) {
-      res.writeHead(400);
-      res.end('{"error":"invalid json"}');
-    }
-  });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'ok', port: PORT }));
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 HTTP Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
