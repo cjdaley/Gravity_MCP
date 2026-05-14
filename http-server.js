@@ -19,18 +19,9 @@ const child = spawn('node', ['src/index.js'], {
 let responseBuffer = '';
 const pendingRequests = {};
 
-// Handle responses from MCP server (combined handler)
-child.stderr.on('data', (data) => {
-  const str = data.toString();
-  
-  // Log non-JSON messages
-  if (!str.trim().startsWith('{')) {
-    console.error('[MCP]', str.trim());
-    return;
-  }
-  
-  // Process JSON responses
-  responseBuffer += str;
+// Handle responses from MCP server on stdout
+child.stdout.on('data', (data) => {
+  responseBuffer += data.toString();
   const lines = responseBuffer.split('\n');
   responseBuffer = lines[lines.length - 1];
   
@@ -49,6 +40,11 @@ child.stderr.on('data', (data) => {
       // Ignore parse errors
     }
   }
+});
+
+// Log stderr
+child.stderr.on('data', (data) => {
+  console.error('[MCP stderr]', data.toString().trim());
 });
 
 const server = http.createServer(async (req, res) => {
