@@ -19,25 +19,36 @@ const child = spawn('node', ['src/index.js'], {
 let responseBuffer = '';
 const pendingRequests = {};
 
-child.stdout.on('data', (data) => {
-  responseBuffer += data.toString();
+// Handle responses from MCP server (combined handler)
+child.stderr.on('data', (data) => {
+  const str = data.toString();
+  
+  // Log non-JSON messages
+  if (!str.trim().startsWith('{')) {
+    console.error('[MCP]', str.trim());
+    return;
+  }
+  
+  // Process JSON responses
+  responseBuffer += str;
   const lines = responseBuffer.split('\n');
   responseBuffer = lines[lines.length - 1];
   
   for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
     try {
-      const msg = JSON.parse(lines[i]);
+      const msg = JSON.parse(line);
       if (msg.id && pendingRequests[msg.id]) {
         const cb = pendingRequests[msg.id];
         delete pendingRequests[msg.id];
         cb(msg);
       }
-    } catch (e) {}
+    } catch (e) {
+      // Ignore parse errors
+    }
   }
-});
-
-child.stderr.on('data', (data) => {
-  console.error('[MCP]', data.toString().trim());
 });
 
 const server = http.createServer(async (req, res) => {
