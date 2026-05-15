@@ -358,6 +358,13 @@ export class GravityFormsClient {
    */
   async listEntries(params = {}) {
     return this.validateAndCall('gf_list_entries', params, async (validated) => {
+      // Auto-discover forms if form_ids is empty or not provided
+      if (!validated.form_ids || validated.form_ids.length === 0) {
+        const formsResponse = await this.httpClient.get('/forms');
+        const allForms = formsResponse.data || [];
+        validated.form_ids = allForms.map(form => form.id);
+      }
+
       // Convert search parameters to Gravity Forms format
       const searchParams = { ...validated };
 
