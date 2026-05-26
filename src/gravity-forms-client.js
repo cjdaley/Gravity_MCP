@@ -376,9 +376,10 @@ export class GravityFormsClient {
         searchParams.sorting = JSON.stringify(validated.sorting);
       }
 
-      if (validated.paging) {
-        searchParams.paging = JSON.stringify(validated.paging);
-      }
+      // FIXED: Do NOT stringify paging object. Let axios encode it as nested params.
+      // The API will receive it as paging[page_num]=1&paging[page_size]=10
+      // Previously: searchParams.paging = JSON.stringify(validated.paging);
+      // This caused the API to ignore pagination parameters entirely.
 
       const response = await this.httpClient.get('/entries', { params: searchParams });
 
