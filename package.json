@@ -8,7 +8,7 @@
     "gkmcp": "src/index.js"
   },
   "scripts": {
-    "start": "node http-server.js",
+    "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "inspect": "npx @modelcontextprotocol/inspector node src/index.js",
     "check-env": "node scripts/check-env.js",
