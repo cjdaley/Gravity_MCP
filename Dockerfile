@@ -10,7 +10,6 @@ RUN npm ci --only=production
 
 # Copy source code
 COPY src ./src
-COPY http-server.js .
 
 # Set environment
 ENV NODE_ENV=production
