@@ -380,6 +380,10 @@ export class GravityFormsClient {
       // The API will receive it as paging[page_num]=1&paging[page_size]=10
       // Previously: searchParams.paging = JSON.stringify(validated.paging);
       // This caused the API to ignore pagination parameters entirely.
+      // NEW: Explicitly include paging if provided (not relying on spread operator)
+      if (validated.paging) {
+        searchParams.paging = validated.paging;
+      }
 
       const response = await this.httpClient.get('/entries', { params: searchParams });
 
