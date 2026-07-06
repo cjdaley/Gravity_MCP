@@ -228,7 +228,8 @@ export const fieldOperationTools = [
             cssClass: { type: 'string' },
             size: { type: 'string', enum: ['small', 'medium', 'large'] },
             visibility: { type: 'string', enum: ['visible', 'hidden', 'administrative'] }
-          }
+          },
+          additionalProperties: false
         },
         position: {
           type: 'object',
@@ -237,7 +238,8 @@ export const fieldOperationTools = [
             mode: { type: 'string', enum: ['append', 'prepend', 'after', 'before', 'index'] },
             reference: { type: 'number', description: 'Reference field ID or index' },
             page: { type: 'number', description: 'Page number' }
-          }
+          },
+          additionalProperties: false
         },
         test_mode: {
           type: 'boolean',
@@ -245,6 +247,7 @@ export const fieldOperationTools = [
           default: false
         }
       },
+      additionalProperties: false,
       required: ['form_id', 'field_type']
     }
   },
@@ -265,7 +268,18 @@ export const fieldOperationTools = [
         },
         properties: {
           type: 'object',
-          description: 'Properties to update'
+          description: 'Properties to update (any subset of the same properties supported by gf_add_field)',
+          properties: {
+            label: { type: 'string' },
+            description: { type: 'string' },
+            isRequired: { type: 'boolean' },
+            placeholder: { type: 'string' },
+            defaultValue: { type: 'string' },
+            cssClass: { type: 'string' },
+            size: { type: 'string', enum: ['small', 'medium', 'large'] },
+            visibility: { type: 'string', enum: ['visible', 'hidden', 'administrative'] }
+          },
+          additionalProperties: false
         },
         force: {
           type: 'boolean',
@@ -278,6 +292,7 @@ export const fieldOperationTools = [
           default: false
         }
       },
+      additionalProperties: false,
       required: ['form_id', 'field_id', 'properties']
     }
   },
@@ -312,6 +327,7 @@ export const fieldOperationTools = [
           default: false
         }
       },
+      additionalProperties: false,
       required: ['form_id', 'field_id']
     }
   },
@@ -344,7 +360,8 @@ export const fieldOperationTools = [
           description: 'Include field variants (requires detail=true)',
           default: false
         }
-      }
+      },
+      additionalProperties: false
     }
   }
 ];
