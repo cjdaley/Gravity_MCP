@@ -156,6 +156,33 @@ function parseMetaJson(metaString) {
     throw new Error(`Invalid JSON in 'meta' parameter: ${error.message}`);
   }
 }
+/**
+ * Core entry columns always kept when field_ids projection is applied,
+ * regardless of which field IDs were requested.
+ */
+const ENTRY_CORE_FIELDS = ['id', 'form_id', 'date_created', 'date_updated', 'status'];
+/**
+ * Reduce each entry object down to only the requested field IDs (plus core
+ * entry columns). Used to keep gf_list_entries responses small when a caller
+ * only needs one or two fields (e.g. a tracking-payload field) out of a form
+ * that has many fields — avoids returning/transmitting unused field data that
+ * can otherwise cause large responses to be truncated downstream.
+ */
+function filterEntryFields(entries, fieldIds) {
+  if (!Array.isArray(fieldIds) || fieldIds.length === 0 || !Array.isArray(entries)) {
+    return entries;
+  }
+  const keepKeys = new Set([...ENTRY_CORE_FIELDS, ...fieldIds.map(String)]);
+  return entries.map((entry) => {
+    const filtered = {};
+    for (const key of Object.keys(entry)) {
+      if (keepKeys.has(key)) {
+        filtered[key] = entry[key];
+      }
+    }
+    return filtered;
+  });
+}
 // =================================
 // FORMS MANAGEMENT TOOLS (6)
 // =================================
@@ -381,6 +408,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 current_page: { type: 'number' }
               },
               additionalProperties: false
+            },
+            field_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional. Limit each returned entry to only these field IDs (e.g. ["14"] for ' +
+                'just the tracking payload field), plus core entry columns (id, form_id, date_created, ' +
+                'date_updated, status). Use this to shrink response size and avoid truncation when a form ' +
+                'has many fields or a query returns many entries — request only the field(s) you actually need.'
             },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
           },
@@ -710,7 +745,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case 'gf_list_entries':
       return wrapHandler(async () => {
         const result = await gravityFormsClient.listEntries(params);
-        return params.compact !== false ? stripEntryMetaFromResponse(result) : result;
+        const output = params.compact !== false ? stripEntryMetaFromResponse(result) : result;
+        if (output && Array.isArray(output.entries) && Array.isArray(params.field_ids) && params.field_ids.length > 0) {
+          return { ...output, entries: filterEntryFields(output.entries, params.field_ids) };
+        }
+        return output;
       }, params)();
     case 'gf_get_entry':
       return wrapHandler(async () => {
