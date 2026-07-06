@@ -169,9 +169,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 additionalProperties: false
               }
             },
-            button: { type: 'object', description: 'Submit button settings' },
-            confirmations: { type: 'object', description: 'Confirmation settings' },
-            notifications: { type: 'object', description: 'Notification settings' },
+            button: { type: 'object', description: 'Submit button settings', additionalProperties: false },
+            confirmations: { type: 'object', description: 'Confirmation settings', additionalProperties: false },
+            notifications: { type: 'object', description: 'Notification settings', additionalProperties: false },
             is_active: { type: 'boolean', description: 'Form active state' }
           },
           required: ['title']
@@ -195,9 +195,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 additionalProperties: false
               }
             },
-            button: { type: 'object', description: 'Submit button settings' },
-            confirmations: { type: 'object', description: 'Confirmation settings' },
-            notifications: { type: 'object', description: 'Notification settings' },
+            button: { type: 'object', description: 'Submit button settings', additionalProperties: false },
+            confirmations: { type: 'object', description: 'Confirmation settings', additionalProperties: false },
+            notifications: { type: 'object', description: 'Notification settings', additionalProperties: false },
             is_active: { type: 'boolean', description: 'Form active state' }
           },
           required: ['id']
