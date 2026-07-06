@@ -5,11 +5,12 @@
  * Tools for forms, entries, and add-ons
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -642,11 +643,42 @@ async function main() {
   try {
     // Initialize client on startup
     await initializeClient();
-    // Create stdio transport
-    const transport = new StdioServerTransport();
-    // Connect server to transport
-    await server.connect(transport);
-    logger.info('🚀 GravityKit MCP running on stdio');
+
+    // Build an Express app and mount the MCP Streamable HTTP transport on /mcp.
+    // Stateless mode (sessionIdGenerator: undefined) creates a fresh transport
+    // per request, which is sufficient for a single-tenant tool server and
+    // avoids having to track session IDs across requests.
+    const app = express();
+    app.use(express.json({ limit: '25mb' }));
+
+    app.post('/mcp', async (req, res) => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true
+        });
+        res.on('close', () => transport.close());
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        logger.error(`MCP request error: ${error.message}`);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: 'Internal server error' },
+            id: null
+          });
+        }
+      }
+    });
+
+    // Simple health check for Railway / uptime checks
+    app.get('/health', (req, res) => res.status(200).send('ok'));
+
+    const port = process.env.PORT || 8080;
+    app.listen(port, '0.0.0.0', () => {
+      logger.info(`🚀 GravityKit MCP running on HTTP at http://0.0.0.0:${port}/mcp`);
+    });
   } catch (error) {
     logger.error(`Failed to start server: ${error}`);
     process.exit(1);
