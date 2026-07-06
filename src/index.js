@@ -1,9 +1,3 @@
-
-
-Does this look correct? 
-
-
-```
 #!/usr/bin/env node
 /**
  * Gravity MCP Server
@@ -672,4 +666,3 @@ main().catch((error) => {
   logger.error(`Fatal error: ${error}`);
   process.exit(1);
 });
-```
