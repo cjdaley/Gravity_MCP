@@ -1,11 +1,15 @@
-#!/usr/bin/env node
 
+
+Does this look correct? 
+
+
+```
+#!/usr/bin/env node
 /**
  * Gravity MCP Server
  * Model Context Protocol server for Gravity Forms
  * Tools for forms, entries, and add-ons
  */
-
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -22,16 +26,13 @@ import FieldAwareValidator from './config/field-validation.js';
 import logger from './utils/logger.js';
 import { sanitize } from './utils/sanitize.js';
 import { stripEmpty, stripEntryMetaFromResponse } from './utils/compact.js';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 // Load environment variables:
 // 	1. Current working directory first
 dotenv.config({ path: join(process.cwd(), '.env') });
 // 	2. Gravity MCP project directory
 dotenv.config({ path: join(__dirname, '..', '.env') });
-
 // Initialize the MCP server
 const server = new Server(
   {
@@ -45,12 +46,10 @@ const server = new Server(
     instructions: 'GravityKit MCP server for Gravity Forms. All responses strip null and empty values by default for minimal token usage. Pass compact=false on any tool to get full raw data. Entry tools also strip plugin-added meta keys; use compact=false to include them.'
   }
 );
-
 // Global client instance
 let gravityFormsClient = null;
 let fieldOperations = null;
 let fieldValidator = null;
-
 /**
  * Initialize Gravity Forms client
  */
@@ -58,11 +57,9 @@ async function initializeClient() {
   try {
     gravityFormsClient = new GravityFormsClient(process.env);
     const validation = await gravityFormsClient.initialize();
-
     if (!validation.available) {
       throw new Error(`Failed to initialize Gravity Forms client: ${validation.error}`);
     }
-
     // Initialize field operations infrastructure
     fieldValidator = new FieldAwareValidator();
     fieldOperations = createFieldOperations(
@@ -70,7 +67,6 @@ async function initializeClient() {
       fieldRegistry,
       fieldValidator
     );
-
     logger.info('✅ GravityKit MCP initialized successfully');
     logger.info('✅ Field operations infrastructure initialized');
     return true;
@@ -79,7 +75,6 @@ async function initializeClient() {
     throw error;
   }
 }
-
 /**
  * Recursively strip null, empty string, and false values from objects/arrays.
  * Reduces token usage by removing noise like empty field values and absent meta keys.
@@ -98,7 +93,6 @@ function createErrorResponse(message, details = null) {
     isError: true
   };
 }
-
 /**
  * Wrap async handler with error handling and response compaction.
  * @param {Function} handler - async function returning result object
@@ -109,11 +103,9 @@ function wrapHandler(handler, params = {}) {
     if (!gravityFormsClient) {
       return createErrorResponse('Gravity Forms client not initialized');
     }
-
     try {
       const result = await handler();
       const output = params.compact !== false ? stripEmpty(result) : result;
-
       return {
         content: [
           {
@@ -129,11 +121,9 @@ function wrapHandler(handler, params = {}) {
     }
   };
 }
-
 // =================================
 // FORMS MANAGEMENT TOOLS (6)
 // =================================
-
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -179,7 +169,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             fields: {
               type: 'array',
               description: 'Array of field objects',
-              items: { type: 'object' }
+              items: {
+                type: 'object',
+                additionalProperties: false
+              }
             },
             button: { type: 'object', description: 'Submit button settings' },
             confirmations: { type: 'object', description: 'Confirmation settings' },
@@ -202,7 +195,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             fields: {
               type: 'array',
               description: 'Array of field objects',
-              items: { type: 'object' }
+              items: {
+                type: 'object',
+                additionalProperties: false
+              }
             },
             button: { type: 'object', description: 'Submit button settings' },
             confirmations: { type: 'object', description: 'Confirmation settings' },
@@ -238,7 +234,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['form_id']
         }
       },
-
       // Entries Management (5 tools)
       {
         name: 'gf_list_entries',
@@ -376,7 +371,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['id']
         }
       },
-
       // Form Submissions (2 tools)
       {
         name: 'gf_submit_form_data',
@@ -405,7 +399,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['form_id']
         }
       },
-
       // Notifications (1 tool)
       {
         name: 'gf_send_notifications',
@@ -424,7 +417,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['entry_id']
         }
       },
-
       // Add-on Feeds (7 tools)
       {
         name: 'gf_list_feeds',
@@ -510,7 +502,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['id']
         }
       },
-
       // Field Filters (1 tool)
       {
         name: 'gf_get_field_filters',
@@ -524,7 +515,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['form_id']
         }
       },
-
       // Results (1 tool)
       {
         name: 'gf_get_results',
@@ -538,26 +528,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['form_id']
         }
       },
-
       // Field Operations (4 tools) - Intelligent field management
       ...fieldOperationTools
     ]
   };
 });
-
 // =================================
 // TOOL HANDLERS
 // =================================
-
 // Forms Management Handlers
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: params } = request.params;
-
   // Ensure client is initialized
   if (!gravityFormsClient) {
     await initializeClient();
   }
-
   // Route to appropriate handler
   // The client already validates internally, just pass params directly
   switch (name) {
@@ -574,7 +559,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return wrapHandler(() => gravityFormsClient.deleteForm(params), params)();
     case 'gf_validate_form':
       return wrapHandler(() => gravityFormsClient.validateForm(params), params)();
-
     // Entries Management
     case 'gf_list_entries':
       return wrapHandler(async () => {
@@ -598,17 +582,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }, params)();
     case 'gf_delete_entry':
       return wrapHandler(() => gravityFormsClient.deleteEntry(params), params)();
-
     // Form Submissions
     case 'gf_submit_form_data':
       return wrapHandler(() => gravityFormsClient.submitFormData(params), params)();
     case 'gf_validate_submission':
       return wrapHandler(() => gravityFormsClient.validateSubmission(params), params)();
-
     // Notifications
     case 'gf_send_notifications':
       return wrapHandler(() => gravityFormsClient.sendNotifications(params), params)();
-
     // Add-on Feeds
     case 'gf_list_feeds':
       return wrapHandler(() => gravityFormsClient.listFeeds(params), params)();
@@ -622,13 +603,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return wrapHandler(() => gravityFormsClient.patchFeed(params), params)();
     case 'gf_delete_feed':
       return wrapHandler(() => gravityFormsClient.deleteFeed(params), params)();
-
     // Utilities
     case 'gf_get_field_filters':
       return wrapHandler(() => gravityFormsClient.getFieldFilters(params), params)();
     case 'gf_get_results':
       return wrapHandler(() => gravityFormsClient.getResults(params), params)();
-
     // Field Operations - Intelligent field management
     case 'gf_add_field':
       return wrapHandler(async () => {
@@ -658,47 +637,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         return await fieldOperationHandlers.gf_list_field_types(params, fieldOperations);
       }, params)();
-
     default:
       return createErrorResponse(`Unknown tool: ${name}`);
   }
 });
-
 // =================================
 // SERVER INITIALIZATION
 // =================================
-
 async function main() {
   try {
     // Initialize client on startup
     await initializeClient();
-
     // Create stdio transport
     const transport = new StdioServerTransport();
-
     // Connect server to transport
     await server.connect(transport);
-
     logger.info('🚀 GravityKit MCP running on stdio');
   } catch (error) {
     logger.error(`Failed to start server: ${error}`);
     process.exit(1);
   }
 }
-
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('👋 Shutting down GravityKit MCP...');
   process.exit(0);
 });
-
 process.on('SIGTERM', async () => {
   logger.info('👋 Shutting down GravityKit MCP...');
   process.exit(0);
 });
-
 // Start the server
 main().catch((error) => {
   logger.error(`Fatal error: ${error}`);
   process.exit(1);
 });
+```
