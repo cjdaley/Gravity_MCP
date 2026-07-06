@@ -138,6 +138,24 @@ function fieldValuesToObject(fieldValuesArray) {
     return acc;
   }, {});
 }
+/**
+ * Parse a feed's JSON-encoded `meta` string param back into an object.
+ * Feed meta shape varies per addon_slug, so it's accepted as a JSON string
+ * (rather than a typed object) to satisfy strict JSON Schema validation
+ * (additionalProperties: false) while still allowing arbitrary config shapes.
+ * Throws a descriptive error on invalid JSON so the caller gets a clear
+ * error response instead of an opaque parse failure.
+ */
+function parseMetaJson(metaString) {
+  if (metaString === undefined || metaString === null) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(metaString);
+  } catch (error) {
+    throw new Error(`Invalid JSON in 'meta' parameter: ${error.message}`);
+  }
+}
 // =================================
 // FORMS MANAGEMENT TOOLS (6)
 // =================================
@@ -158,7 +176,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Form IDs to include'
             },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
-          }
+          },
+          additionalProperties: false
         }
       },
       {
@@ -171,6 +190,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'number', description: 'Form ID' },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -235,6 +255,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'number', description: 'Form ID' },
             force: { type: 'boolean', description: 'Permanent delete (vs trash)' }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -306,7 +327,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         type: 'string',
                         enum: ['=', 'IS', 'CONTAINS', 'IS NOT', 'ISNOT', '<>', 'LIKE', 'NOT IN', 'NOTIN', 'IN', '>', '<', '>=', '<=']
                       }
-                    }
+                    },
+                    additionalProperties: false
                   }
                 },
                 mode: {
@@ -314,7 +336,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   enum: ['any', 'all'],
                   description: 'Search mode'
                 }
-              }
+              },
+              additionalProperties: false
             },
             sorting: {
               type: 'object',
@@ -324,17 +347,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                   type: 'string',
                   enum: ['asc', 'desc', 'ASC', 'DESC']
                 }
-              }
+              },
+              additionalProperties: false
             },
             paging: {
               type: 'object',
               properties: {
                 page_size: { type: 'number' },
                 current_page: { type: 'number' }
-              }
+              },
+              additionalProperties: false
             },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
-          }
+          },
+          additionalProperties: false
         }
       },
       {
@@ -347,6 +373,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'number', description: 'Entry ID' },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -424,6 +451,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'number', description: 'Entry ID' },
             force: { type: 'boolean', description: 'Permanent delete (vs trash)' }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -495,6 +523,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Notification IDs to send'
             }
           },
+          additionalProperties: false,
           required: ['entry_id']
         }
       },
@@ -509,7 +538,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             addon: { type: 'string', description: 'Addon slug' },
             form_id: { type: 'number', description: 'Form ID' },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
-          }
+          },
+          additionalProperties: false
         }
       },
       {
@@ -522,6 +552,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'number', description: 'Feed ID' },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -538,8 +569,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             addon_slug: { type: 'string', description: 'Add-on slug' },
             form_id: { type: 'number', description: 'Form ID' },
             is_active: { type: 'boolean', description: 'Feed active state' },
-            meta: { type: 'object', description: 'Feed config' }
+            meta: { type: 'string', description: 'Feed configuration as a JSON-encoded string (e.g. \'{"key":"value"}\'). Must be valid JSON; shape varies by addon_slug.' }
           },
+          additionalProperties: false,
           required: ['addon_slug', 'form_id', 'meta']
         }
       },
@@ -552,8 +584,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             id: { type: 'number', description: 'Feed ID' },
             is_active: { type: 'boolean', description: 'Feed active state' },
-            meta: { type: 'object', description: 'Feed config' }
+            meta: { type: 'string', description: 'Feed configuration as a JSON-encoded string (e.g. \'{"key":"value"}\'). Must be valid JSON; shape varies by addon_slug.' }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -566,8 +599,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             id: { type: 'number', description: 'Feed ID' },
             is_active: { type: 'boolean', description: 'Feed active state' },
-            meta: { type: 'object', description: 'Feed config' }
+            meta: { type: 'string', description: 'Feed configuration as a JSON-encoded string (e.g. \'{"key":"value"}\'). Must be valid JSON; shape varies by addon_slug.' }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -580,6 +614,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             id: { type: 'number', description: 'Feed ID' }
           },
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -593,6 +628,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             form_id: { type: 'number', description: 'Form ID' }
           },
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -606,6 +642,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             form_id: { type: 'number', description: 'Form ID' }
           },
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -709,12 +746,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return wrapHandler(() => gravityFormsClient.listFeeds(params), params)();
     case 'gf_get_feed':
       return wrapHandler(() => gravityFormsClient.getFeed(params), params)();
-    case 'gf_create_feed':
-      return wrapHandler(() => gravityFormsClient.createFeed(params), params)();
-    case 'gf_update_feed':
-      return wrapHandler(() => gravityFormsClient.updateFeed(params), params)();
-    case 'gf_patch_feed':
-      return wrapHandler(() => gravityFormsClient.patchFeed(params), params)();
+    case 'gf_create_feed': {
+      return wrapHandler(async () => {
+        const createFeedParams = {
+          addon_slug: params.addon_slug,
+          form_id: params.form_id,
+          is_active: params.is_active,
+          meta: parseMetaJson(params.meta)
+        };
+        return await gravityFormsClient.createFeed(createFeedParams);
+      }, params)();
+    }
+    case 'gf_update_feed': {
+      return wrapHandler(async () => {
+        const updateFeedParams = {
+          id: params.id,
+          is_active: params.is_active,
+          meta: parseMetaJson(params.meta)
+        };
+        return await gravityFormsClient.updateFeed(updateFeedParams);
+      }, params)();
+    }
+    case 'gf_patch_feed': {
+      return wrapHandler(async () => {
+        const patchFeedParams = {
+          id: params.id,
+          is_active: params.is_active,
+          meta: parseMetaJson(params.meta)
+        };
+        return await gravityFormsClient.patchFeed(patchFeedParams);
+      }, params)();
+    }
     case 'gf_delete_feed':
       return wrapHandler(() => gravityFormsClient.deleteFeed(params), params)();
     // Utilities
