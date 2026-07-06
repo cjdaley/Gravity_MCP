@@ -288,7 +288,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // Entries Management (5 tools)
       {
         name: 'gf_list_entries',
-        description: 'List/search entries with filtering, sorting, and pagination.',
+        description: 'List/search entries with filtering, sorting, and pagination. ' +
+          'There is no separate date-range parameter — filter by date using search.field_filters ' +
+          'with key "date_created" (see that field\'s description for the exact syntax).',
         annotations: { readOnlyHint: true, openWorldHint: true },
         inputSchema: {
           type: 'object',
@@ -315,17 +317,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             search: {
               type: 'object',
+              description: 'Search/filter criteria. To filter by a date range (e.g. "just June leads"), ' +
+                'use two field_filters entries on key "date_created" — one with operator ">=" and the ' +
+                'start-of-range value, one with operator "<=" and the end-of-range value — combined with ' +
+                'mode "all" so both bounds apply together. Example for June 2026: ' +
+                '{ "mode": "all", "field_filters": [' +
+                '{ "key": "date_created", "operator": ">=", "value": "2026-06-01 00:00:00" }, ' +
+                '{ "key": "date_created", "operator": "<=", "value": "2026-06-30 23:59:59" }] }',
               properties: {
                 field_filters: {
                   type: 'array',
+                  description: 'One condition per entry. Combine with "mode" to control AND/OR logic.',
                   items: {
                     type: 'object',
                     properties: {
-                      key: { type: 'string' },
-                      value: { type: 'string' },
+                      key: {
+                        type: 'string',
+                        description: 'Field to filter on. Use "date_created" for date-range filtering ' +
+                          '(value format: "YYYY-MM-DD HH:MM:SS", site timezone). Other common keys: ' +
+                          '"status", or a numeric Gravity Forms field ID (e.g. "1", "2") to filter on a ' +
+                          'specific form field\'s value.'
+                      },
+                      value: {
+                        type: 'string',
+                        description: 'Value to compare against. For "date_created", use "YYYY-MM-DD HH:MM:SS" ' +
+                          '(e.g. "2026-06-01 00:00:00").'
+                      },
                       operator: {
                         type: 'string',
-                        enum: ['=', 'IS', 'CONTAINS', 'IS NOT', 'ISNOT', '<>', 'LIKE', 'NOT IN', 'NOTIN', 'IN', '>', '<', '>=', '<=']
+                        enum: ['=', 'IS', 'CONTAINS', 'IS NOT', 'ISNOT', '<>', 'LIKE', 'NOT IN', 'NOTIN', 'IN', '>', '<', '>=', '<='],
+                        description: 'Comparison operator. Use ">=" and "<=" together on "date_created" ' +
+                          'to express a date range (with mode "all").'
                       }
                     },
                     additionalProperties: false
@@ -334,7 +356,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 mode: {
                   type: 'string',
                   enum: ['any', 'all'],
-                  description: 'Search mode'
+                  description: 'Search mode: "all" = AND all field_filters together (required for a date ' +
+                    'range, since it needs both the ">=" and "<=" conditions to hold at once); ' +
+                    '"any" = OR them together.'
                 }
               },
               additionalProperties: false
