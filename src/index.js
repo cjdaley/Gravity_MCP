@@ -116,6 +116,28 @@ function wrapHandler(handler, params = {}) {
     }
   };
 }
+/**
+ * Convert array-of-pairs field_values to a flat object shape.
+ *
+ * Input:  [{ field_id: "1", value: "text" }, { field_id: "2", value: "other" }]
+ * Output: { "1": "text", "2": "other" }
+ *
+ * The array-of-pairs schema shape is required so each tool's inputSchema can
+ * satisfy strict JSON Schema validation (additionalProperties: false) while
+ * still accepting an arbitrary number of dynamically-named Gravity Forms
+ * field IDs.
+ */
+function fieldValuesToObject(fieldValuesArray) {
+  if (!Array.isArray(fieldValuesArray)) {
+    return {};
+  }
+  return fieldValuesArray.reduce((acc, pair) => {
+    if (pair && pair.field_id !== undefined && pair.value !== undefined) {
+      acc[String(pair.field_id)] = pair.value;
+    }
+    return acc;
+  }, {});
+}
 // =================================
 // FORMS MANAGEMENT TOOLS (6)
 // =================================
@@ -223,9 +245,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
-            form_id: { type: 'number', description: 'Form ID' }
+            form_id: { type: 'number', description: 'Form ID' },
+            field_values: {
+              type: 'array',
+              description: 'Field values to validate, one entry per field',
+              items: {
+                type: 'object',
+                properties: {
+                  field_id: { type: 'string', description: 'Gravity Forms field ID (e.g. "1", "2", "1.3")' },
+                  value: { type: 'string', description: 'Value for this field' }
+                },
+                required: ['field_id', 'value'],
+                additionalProperties: false
+              }
+            }
           },
-          additionalProperties: true,
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -329,9 +364,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               enum: ['active', 'spam', 'trash'],
               description: 'Entry status'
             },
-            date_created: { type: 'string', description: 'ISO date' }
+            date_created: { type: 'string', description: 'ISO date' },
+            field_values: {
+              type: 'array',
+              description: 'Field values for entry, one entry per field',
+              items: {
+                type: 'object',
+                properties: {
+                  field_id: { type: 'string', description: 'Gravity Forms field ID (e.g. "1", "2", "1.3")' },
+                  value: { type: 'string', description: 'Value for this field' }
+                },
+                required: ['field_id', 'value'],
+                additionalProperties: false
+              }
+            }
           },
-          additionalProperties: true,
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -347,9 +395,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               enum: ['active', 'spam', 'trash'],
               description: 'Entry status'
+            },
+            field_values: {
+              type: 'array',
+              description: 'Field values to update, one entry per field',
+              items: {
+                type: 'object',
+                properties: {
+                  field_id: { type: 'string', description: 'Gravity Forms field ID (e.g. "1", "2", "1.3")' },
+                  value: { type: 'string', description: 'Value for this field' }
+                },
+                required: ['field_id', 'value'],
+                additionalProperties: false
+              }
             }
           },
-          additionalProperties: true,
+          additionalProperties: false,
           required: ['id']
         }
       },
@@ -375,9 +436,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             form_id: { type: 'number', description: 'Form ID' },
-            field_values: { type: 'object', description: 'Field values' }
+            field_values: {
+              type: 'array',
+              description: 'Field values to submit, one entry per field',
+              items: {
+                type: 'object',
+                properties: {
+                  field_id: { type: 'string', description: 'Gravity Forms field ID (e.g. "1", "2", "1.3")' },
+                  value: { type: 'string', description: 'Value for this field' }
+                },
+                required: ['field_id', 'value'],
+                additionalProperties: false
+              }
+            }
           },
-          additionalProperties: true,
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -388,9 +461,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
-            form_id: { type: 'number', description: 'Form ID' }
+            form_id: { type: 'number', description: 'Form ID' },
+            field_values: {
+              type: 'array',
+              description: 'Field values to validate, one entry per field',
+              items: {
+                type: 'object',
+                properties: {
+                  field_id: { type: 'string', description: 'Gravity Forms field ID (e.g. "1", "2", "1.3")' },
+                  value: { type: 'string', description: 'Value for this field' }
+                },
+                required: ['field_id', 'value'],
+                additionalProperties: false
+              }
+            }
           },
-          additionalProperties: true,
+          additionalProperties: false,
           required: ['form_id']
         }
       },
@@ -552,8 +638,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return wrapHandler(() => gravityFormsClient.updateForm(params), params)();
     case 'gf_delete_form':
       return wrapHandler(() => gravityFormsClient.deleteForm(params), params)();
-    case 'gf_validate_form':
-      return wrapHandler(() => gravityFormsClient.validateForm(params), params)();
+    case 'gf_validate_form': {
+      const validateFormParams = {
+        form_id: params.form_id,
+        ...fieldValuesToObject(params.field_values)
+      };
+      return wrapHandler(() => gravityFormsClient.validateForm(validateFormParams), validateFormParams)();
+    }
     // Entries Management
     case 'gf_list_entries':
       return wrapHandler(async () => {
@@ -565,23 +656,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await gravityFormsClient.getEntry(params);
         return params.compact !== false ? stripEntryMetaFromResponse(result) : result;
       }, params)();
-    case 'gf_create_entry':
+    case 'gf_create_entry': {
+      const createEntryParams = {
+        form_id: params.form_id,
+        created_by: params.created_by,
+        status: params.status,
+        date_created: params.date_created,
+        ...fieldValuesToObject(params.field_values)
+      };
       return wrapHandler(async () => {
-        const result = await gravityFormsClient.createEntry(params);
+        const result = await gravityFormsClient.createEntry(createEntryParams);
         return params.compact !== false ? stripEntryMetaFromResponse(result) : result;
       }, params)();
-    case 'gf_update_entry':
+    }
+    case 'gf_update_entry': {
+      const updateEntryParams = {
+        id: params.id,
+        status: params.status,
+        ...fieldValuesToObject(params.field_values)
+      };
       return wrapHandler(async () => {
-        const result = await gravityFormsClient.updateEntry(params);
+        const result = await gravityFormsClient.updateEntry(updateEntryParams);
         return params.compact !== false ? stripEntryMetaFromResponse(result) : result;
       }, params)();
+    }
     case 'gf_delete_entry':
       return wrapHandler(() => gravityFormsClient.deleteEntry(params), params)();
     // Form Submissions
-    case 'gf_submit_form_data':
-      return wrapHandler(() => gravityFormsClient.submitFormData(params), params)();
-    case 'gf_validate_submission':
-      return wrapHandler(() => gravityFormsClient.validateSubmission(params), params)();
+    case 'gf_submit_form_data': {
+      // NOTE: unlike the other field-value tools, submitFormData's original
+      // schema declared field_values as a nested object property (not bare
+      // additionalProperties passthrough), so field values stay nested here
+      // rather than being flattened onto the top-level params object.
+      const submitFormParams = {
+        form_id: params.form_id,
+        field_values: fieldValuesToObject(params.field_values)
+      };
+      return wrapHandler(() => gravityFormsClient.submitFormData(submitFormParams), submitFormParams)();
+    }
+    case 'gf_validate_submission': {
+      const validateSubmissionParams = {
+        form_id: params.form_id,
+        ...fieldValuesToObject(params.field_values)
+      };
+      return wrapHandler(() => gravityFormsClient.validateSubmission(validateSubmissionParams), validateSubmissionParams)();
+    }
     // Notifications
     case 'gf_send_notifications':
       return wrapHandler(() => gravityFormsClient.sendNotifications(params), params)();
