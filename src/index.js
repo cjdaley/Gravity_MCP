@@ -167,21 +167,100 @@ const ENTRY_CORE_FIELDS = ['id', 'form_id', 'date_created', 'date_updated', 'sta
  * only needs one or two fields (e.g. a tracking-payload field) out of a form
  * that has many fields — avoids returning/transmitting unused field data that
  * can otherwise cause large responses to be truncated downstream.
+ *
+ * If renameMap is provided (numeric field ID string -> semantic name, as
+ * produced by field_names resolution), matching keys are renamed to their
+ * semantic name in the output instead of being left as numeric IDs. Fields
+ * requested via raw field_ids (no associated name) keep their numeric ID.
  */
-function filterEntryFields(entries, fieldIds) {
+function filterEntryFields(entries, fieldIds, renameMap) {
   if (!Array.isArray(fieldIds) || fieldIds.length === 0 || !Array.isArray(entries)) {
     return entries;
   }
   const keepKeys = new Set([...ENTRY_CORE_FIELDS, ...fieldIds.map(String)]);
+  const rename = renameMap || {};
   return entries.map((entry) => {
     const filtered = {};
     for (const key of Object.keys(entry)) {
       if (keepKeys.has(key)) {
-        filtered[key] = entry[key];
+        const outputKey = rename[key] || key;
+        filtered[outputKey] = entry[key];
       }
     }
     return filtered;
   });
+}
+/**
+ * Resolve human-readable field names (matched against inputName, adminLabel,
+ * or label, in that priority order, case-insensitively) to numeric field IDs
+ * for a single form's field configuration. Field IDs are per-form in Gravity
+ * Forms, so this must be run separately for each form being queried.
+ *
+ * Returns an array of {id, name} pairs (not just bare IDs) so callers can
+ * build a rename map for output keys, letting field_names responses use the
+ * semantic name as the key instead of the numeric field ID.
+ */
+function resolveFieldIdsByName(formFields, names) {
+  if (!Array.isArray(formFields) || !Array.isArray(names) || names.length === 0) {
+    return [];
+  }
+  const lowerToOriginal = new Map(names.map((n) => [String(n).toLowerCase(), n]));
+  const resolved = [];
+  for (const field of formFields) {
+    const candidates = [field.inputName, field.adminLabel, field.label]
+      .filter((v) => v !== undefined && v !== null && v !== '')
+      .map((v) => String(v).toLowerCase());
+    const match = candidates.find((c) => lowerToOriginal.has(c));
+    if (match !== undefined && field.id !== undefined) {
+      resolved.push({ id: String(field.id), name: lowerToOriginal.get(match) });
+    }
+  }
+  return resolved;
+}
+/**
+ * Normalize a date_created filter value to the format Gravity Forms' search
+ * API actually expects: "YYYY-MM-DD HH:MM:SS" (space-separated, no T/Z).
+ * Tolerates common LLM-generated alternatives so a wrong-but-close date
+ * format doesn't silently fail or get rejected:
+ *   - ISO 8601 with T and optional Z/offset/milliseconds, e.g.
+ *     "2026-06-01T00:00:00Z" or "2026-06-01T00:00:00.000+00:00"
+ *   - Bare date "2026-06-01" is left as-is (ambiguous whether start/end of
+ *     day was intended, so no assumption is made there).
+ */
+function normalizeDateCreatedValue(value) {
+  if (typeof value !== 'string') return value;
+  const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]} ${isoMatch[2]}`;
+  }
+  return value;
+}
+/**
+ * Walk a gf_list_entries search object and normalize any date_created
+ * field_filters values in place (returns a new object, does not mutate).
+ */
+function normalizeSearchDateFilters(search) {
+  if (!search || !Array.isArray(search.field_filters)) return search;
+  return {
+    ...search,
+    field_filters: search.field_filters.map((filter) => {
+      if (filter && filter.key === 'date_created' && typeof filter.value === 'string') {
+        return { ...filter, value: normalizeDateCreatedValue(filter.value) };
+      }
+      return filter;
+    }),
+  };
+}
+/**
+ * Extract the fields array from a gf_get_form-style response, tolerating a
+ * couple of plausible shapes since the exact client return shape isn't
+ * pinned down here.
+ */
+function extractFormFields(formResult) {
+  if (!formResult) return [];
+  if (Array.isArray(formResult.fields)) return formResult.fields;
+  if (formResult.form && Array.isArray(formResult.form.fields)) return formResult.form.fields;
+  return [];
 }
 // =================================
 // FORMS MANAGEMENT TOOLS (6)
@@ -317,7 +396,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: 'gf_list_entries',
         description: 'List/search entries with filtering, sorting, and pagination. ' +
           'There is no separate date-range parameter — filter by date using search.field_filters ' +
-          'with key "date_created" (see that field\'s description for the exact syntax).',
+          'with key "date_created" (see that field\'s description for the exact syntax). ' +
+          'By default this tool automatically fetches every matching page and returns the complete ' +
+          'result set in one response (see "auto_paginate" and "is_complete" in the response) — you do ' +
+          'not need to manually loop through pages or compare against total_count yourself. ' +
+          'Field IDs are assigned per-form and are NOT consistent across different forms — do not assume ' +
+          'a field ID that works on one form applies to another. Use "field_names" (not "field_ids") when ' +
+          'you know a field by its name/label (e.g. "tracking_payload") but not its numeric ID for a given ' +
+          'form; this tool will look it up for you automatically, no separate gf_get_form call required.',
         annotations: { readOnlyHint: true, openWorldHint: true },
         inputSchema: {
           type: 'object',
@@ -360,15 +446,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     properties: {
                       key: {
                         type: 'string',
-                        description: 'Field to filter on. Use "date_created" for date-range filtering ' +
-                          '(value format: "YYYY-MM-DD HH:MM:SS", site timezone). Other common keys: ' +
-                          '"status", or a numeric Gravity Forms field ID (e.g. "1", "2") to filter on a ' +
-                          'specific form field\'s value.'
+                        description: 'Field to filter on. This property MUST be named "key" — not "field_id" ' +
+                          'or anything else. Use "date_created" for date-range filtering (value format: ' +
+                          '"YYYY-MM-DD HH:MM:SS", site timezone — ISO 8601 like "2026-06-01T00:00:00Z" is ' +
+                          'also accepted and auto-converted). Other common keys: "status", or a numeric ' +
+                          'Gravity Forms field ID (e.g. "1", "2") to filter on a specific form field\'s value.'
                       },
                       value: {
                         type: 'string',
                         description: 'Value to compare against. For "date_created", use "YYYY-MM-DD HH:MM:SS" ' +
-                          '(e.g. "2026-06-01 00:00:00").'
+                          '(e.g. "2026-06-01 00:00:00") — ISO 8601 (e.g. "2026-06-01T00:00:00Z") is also ' +
+                          'accepted and will be auto-converted.'
                       },
                       operator: {
                         type: 'string',
@@ -412,10 +500,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             field_ids: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Optional. Limit each returned entry to only these field IDs (e.g. ["14"] for ' +
-                'just the tracking payload field), plus core entry columns (id, form_id, date_created, ' +
-                'date_updated, status). Use this to shrink response size and avoid truncation when a form ' +
-                'has many fields or a query returns many entries — request only the field(s) you actually need.'
+              description: 'Optional. Limit each returned entry to only these numeric field IDs (e.g. ["14"] ' +
+                'for just the tracking payload field on a form where you already know that field is id 14), ' +
+                'plus core entry columns (id, form_id, date_created, date_updated, status). Use this to shrink ' +
+                'response size and avoid truncation when a form has many fields or a query returns many entries. ' +
+                'Field IDs vary per form — if querying multiple forms or you don\'t already know the ID, use ' +
+                '"field_names" instead.'
+            },
+            field_names: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional. Specify field(s) by name instead of numeric ID (matched ' +
+                'case-insensitively against each field\'s inputName, adminLabel, or label, in that priority ' +
+                'order) — e.g. ["tracking_payload", "phone", "email"]. The matching numeric field ID is looked ' +
+                'up automatically per form via the form\'s field configuration, so you don\'t need to call ' +
+                'gf_get_form separately first. Unlike "field_ids", each returned entry\'s key is renamed to ' +
+                'the semantic name you requested (e.g. entry["tracking_payload"], not entry["14"]) — this ' +
+                'holds even when different forms map that name to different numeric IDs, so downstream code ' +
+                'can rely on one consistent key across every form. Requires "form_ids" to be set, since ' +
+                'resolution happens per form. If a form has no field matching any given name, the response ' +
+                'includes that form ID under "unresolved_field_names" instead of silently omitting it.'
+            },
+            auto_paginate: {
+              type: 'boolean',
+              description: 'Default true: automatically fetch every matching page (up to a safety cap of 10 ' +
+                'pages / 2000 entries) and return the full combined result set in one response, so you don\'t ' +
+                'have to manually check total_count and re-request additional pages yourself. Set to false to ' +
+                'fetch only a single page, controlled manually via the "paging" parameter.',
+              default: true
             },
             compact: { type: 'boolean', description: 'Return raw uncompacted data', default: true }
           },
@@ -744,12 +856,100 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Entries Management
     case 'gf_list_entries':
       return wrapHandler(async () => {
-        const result = await gravityFormsClient.listEntries(params);
-        const output = params.compact !== false ? stripEntryMetaFromResponse(result) : result;
-        if (output && Array.isArray(output.entries) && Array.isArray(params.field_ids) && params.field_ids.length > 0) {
-          return { ...output, entries: filterEntryFields(output.entries, params.field_ids) };
+        // Normalize date_created filter values (tolerates ISO 8601 input,
+        // e.g. "2026-06-01T00:00:00Z", converting to the format Gravity
+        // Forms' search API actually expects: "2026-06-01 00:00:00").
+        const normalizedParams = params.search
+          ? { ...params, search: normalizeSearchDateFilters(params.search) }
+          : params;
+
+        // Resolve field_names -> field_ids, per form, before querying entries.
+        // Also build a rename map (numeric ID -> semantic name) so the
+        // response can use the requested name as the key instead of leaving
+        // it as a numeric field ID.
+        let effectiveFieldIds = Array.isArray(normalizedParams.field_ids) ? [...normalizedParams.field_ids] : [];
+        const idToName = {};
+        const unresolvedFieldNames = [];
+        if (Array.isArray(normalizedParams.field_names) && normalizedParams.field_names.length > 0) {
+          if (!Array.isArray(normalizedParams.form_ids) || normalizedParams.form_ids.length === 0) {
+            throw new Error("'field_names' requires 'form_ids' to be set, since field IDs are looked up per form.");
+          }
+          for (const formId of normalizedParams.form_ids) {
+            const formResult = await gravityFormsClient.getForm({ id: formId });
+            const formFields = extractFormFields(formResult);
+            const resolvedPairs = resolveFieldIdsByName(formFields, normalizedParams.field_names);
+            if (resolvedPairs.length === 0) {
+              unresolvedFieldNames.push(formId);
+            }
+            for (const pair of resolvedPairs) {
+              effectiveFieldIds.push(pair.id);
+              idToName[pair.id] = pair.name;
+            }
+          }
+          effectiveFieldIds = [...new Set(effectiveFieldIds)];
         }
-        return output;
+
+        // Fetch entries, auto-paginating by default so the caller gets the
+        // complete result set (up to a safety cap) in one response instead
+        // of having to manually detect total_count mismatches and re-page.
+        const autoPaginate = normalizedParams.auto_paginate !== false;
+        const AUTO_PAGE_SIZE = 200;
+        const MAX_AUTO_PAGES = 10;
+
+        let allEntries = [];
+        let totalCount = 0;
+        let pagesFetched = 0;
+
+        if (autoPaginate) {
+          let currentPage = 1;
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const pageParams = {
+              ...normalizedParams,
+              paging: { page_size: AUTO_PAGE_SIZE, current_page: currentPage }
+            };
+            const pageResult = await gravityFormsClient.listEntries(pageParams);
+            const pageOutput = normalizedParams.compact !== false ? stripEntryMetaFromResponse(pageResult) : pageResult;
+            const pageEntries = Array.isArray(pageOutput.entries) ? pageOutput.entries : [];
+            if (typeof pageOutput.total_count === 'number') {
+              totalCount = pageOutput.total_count;
+            }
+            allEntries.push(...pageEntries);
+            pagesFetched += 1;
+            const noMorePages = pageEntries.length < AUTO_PAGE_SIZE || allEntries.length >= totalCount;
+            if (noMorePages || pagesFetched >= MAX_AUTO_PAGES) {
+              break;
+            }
+            currentPage += 1;
+          }
+        } else {
+          const result = await gravityFormsClient.listEntries(normalizedParams);
+          const output = normalizedParams.compact !== false ? stripEntryMetaFromResponse(result) : result;
+          allEntries = Array.isArray(output.entries) ? output.entries : [];
+          totalCount = typeof output.total_count === 'number' ? output.total_count : allEntries.length;
+          pagesFetched = 1;
+        }
+
+        const isComplete = allEntries.length >= totalCount;
+
+        if (effectiveFieldIds.length > 0) {
+          allEntries = filterEntryFields(allEntries, effectiveFieldIds, idToName);
+        }
+
+        return {
+          entries: allEntries,
+          total_count: totalCount,
+          entries_returned: allEntries.length,
+          pages_fetched: pagesFetched,
+          is_complete: isComplete,
+          ...(!isComplete ? {
+            truncation_notice: `Only ${allEntries.length} of ${totalCount} matching entries were returned ` +
+              `(safety cap of ${MAX_AUTO_PAGES} pages / ${MAX_AUTO_PAGES * AUTO_PAGE_SIZE} entries reached). ` +
+              'Narrow your date range or filters, or issue additional requests with auto_paginate:false and ' +
+              'a higher paging.current_page, to retrieve the remainder.'
+          } : {}),
+          ...(unresolvedFieldNames.length > 0 ? { unresolved_field_names: unresolvedFieldNames } : {})
+        };
       }, params)();
     case 'gf_get_entry':
       return wrapHandler(async () => {
