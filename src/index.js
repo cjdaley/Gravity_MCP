@@ -21,6 +21,7 @@ import FieldAwareValidator from './config/field-validation.js';
 import logger from './utils/logger.js';
 import { sanitize } from './utils/sanitize.js';
 import { stripEmpty, stripEntryMetaFromResponse } from './utils/compact.js';
+import { timingSafeEqual } from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Load environment variables:
@@ -28,6 +29,13 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(process.cwd(), '.env') });
 // 	2. Gravity MCP project directory
 dotenv.config({ path: join(__dirname, '..', '.env') });
+
+const mcpToken = process.env.GRAVITY_MCP_TOKEN;
+if (!mcpToken) {
+  logger.error('GRAVITY_MCP_TOKEN environment variable is required');
+  process.exit(1);
+}
+
 // Initialize the MCP server
 const server = new Server(
   {
@@ -1094,6 +1102,20 @@ async function main() {
     // avoids having to track session IDs across requests.
     const app = express();
     app.use(express.json({ limit: '25mb' }));
+
+        function requireMcpToken(req, res, next) {
+      const auth = req.headers.authorization || '';
+      const provided = auth.toLowerCase().startsWith('bearer ')
+        ? auth.slice(7).trim()
+        : '';
+      const a = Buffer.from(provided);
+      const b = Buffer.from(mcpToken);
+      if (!provided || a.length !== b.length || !timingSafeEqual(a, b)) {
+        return res.status(401).json({ error: 'unauthorized' });
+      }
+      next();
+    }
+    app.use('/mcp', requireMcpToken);
 
     app.post('/mcp', async (req, res) => {
       try {
